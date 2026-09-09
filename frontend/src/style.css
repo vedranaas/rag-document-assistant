@@ -135,3 +135,22 @@ button:disabled {
   margin-bottom: 6px;
   opacity: 0.7;
 }
+
+.upload-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.upload-section input[type="file"] {
+  flex: 1;
+}
+
+.upload-section button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}

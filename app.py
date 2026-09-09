@@ -1,13 +1,12 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import os
 from dotenv import load_dotenv
-from langchain_community.document_loaders import PyPDFDirectoryLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from huggingface_hub import InferenceClient
-from langchain_core.tools import tool
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
@@ -52,121 +51,80 @@ hf_client=InferenceClient(
     api_key=HF_TOKEN
 )
 
-def ask_llm(prompt):
-    response = hf_client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            tools=[
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "search_document",
-                        "description": "Search the document for information relevant to the user's question.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "The question or information to search for in the document."
-                                }
-                            },
-                            "required": ["query"]
-                        }
-                    }
-                }
-            ],
-            max_tokens=500
-        )
-    
-    return response.choices[0].message
 
 
+def agent_answer(question: str, history):
 
-@tool
-def search_document(query: str) -> str:
-    """Search the document for information relevant to the user's question."""
-
-    documents = vector_store.similarity_search(query, k=3)
-
+    documents = vector_store.similarity_search(question, k=3)
     if not documents:
-        return "No relevant information was found in the document."
+        return {
+            "answer": "I cannot find the answer in the provided document.",
+            sources: []
+        }
 
-    return "\n\n".join(
+    retrieved_information = "\n\n".join(
         f"Page {document.metadata.get('page', 'unknown')}:\n{document.page_content}"
         for document in documents
-        )
+    )
 
-tools = [search_document]
-
-
-def get_sources(query: str):
-    documents = vector_store.similarity_search(query, k=3)
-
-    return[
+    messages = [
         {
-            "page": document.metadata.get("page", "unknown"),
-            "content": document.page_content
+            "role": "system",
+            "content": """
+            You are a helpful document assistant.
+            Answer the user's question using only the information retrieved from the document.
+            If the answer cannot be found in the retrieved information, say:
+            "I cannot find the answer in the provided document."
+            Do not invent information.
+            """
+        }
+    ]
+
+    messages.extend(
+        message.model_dump()
+        for message in history
+    )
+
+    messages.append(
+        {
+            "role": "user",
+            "content": f"""
+            Retrieved information:
+            {retrieved_information}
+            User question:
+            {question}
+            """
+        }
+    )
+
+    response = hf_client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=messages,
+        max_tokens=500
+    )
+
+    sources = [
+        {
+            "page": document.metadata.get("page", "unknown")
         }
         for document in documents
     ]
 
+        
+    return {
+        "answer": response.choices[0].message.content,
+        "sources": sources
+    }
 
-def agent_answer(question: str):
 
-    first_response = ask_llm(question)
-
-    if first_response.tool_calls:
-        tool_call = first_response.tool_calls[0]
-
-        if tool_call.function.name == "search_document":
-
-            import json
-
-            arguments = json.loads(tool_call.function.arguments)
-            query = arguments["query"]
-            tool_result = search_document.invoke(query)
-
-            sources = get_sources(query)
-
-            final_prompt = f"""
-            You are a helpful document assistant.
-            Use the following information retreived from the document to answer the user's question.
-            Retreived information:
-            {tool_result}
-            User question:
-            {question}
-            Answer only using the retreived information.
-            If the answer cannot be found say:
-            "I cannot find the answer in the provided document."
-            Answer:
-            """
-
-            final_response = hf_client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": final_prompt
-                    }
-                ],
-                max_tokens=500
-            )
-            return {
-                "answer": final_response.choices[0].message.content,
-                "sources": sources
-            }
-
-    return first_response.content
+class Message(BaseModel):
+    role: str
+    content: str
 
 
 class Question(BaseModel):
     question: str
-
+    history: list[Message] = []
 
 
 
@@ -174,9 +132,37 @@ class Question(BaseModel):
 def home():
     return {"message": "RAG API is running"}
 
+
+@app.post("/upload")
+async def upload_pdf(file: UploadFile = File(...)):
+    if file.content_type != "application/pdf":
+        return {"error": "Only PDF files are allowed."}
+
+    contents = await file.read()
+
+    with open("uploaded.pdf", "wb") as f:
+        f.write(contents)
+
+    loader = PyPDFLoader("uploaded.pdf")
+    documents = loader.load()
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=50
+    )
+    chunks = text_splitter.split_documents(documents )
+
+    vector_store.delete(delete_all=True)
+    vector_store.add_documents(chunks)
+
+    return {
+        "filename": file.filename,
+        "message": "PDF uploaded successfully."
+    }
+
 @app.post("/ask")
 def ask_question(request: Question):
-    result=agent_answer(request.question)
+    result=agent_answer(request.question, request.history)
 
     return {
         "question": request.question,

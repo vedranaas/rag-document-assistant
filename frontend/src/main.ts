@@ -13,26 +13,76 @@ app.innerHTML = `
         </div>
       </header>
 
-    <div class="chat">
+      <div class="upload-section">
+        <input type="file" id="pdfInput" accept=".pdf" />
+        <button id="uploadButton">Upload PDF</button>
+      </div>
+
+      <div class="chat">
       
+      </div>
 
-    
+      <div class="input-area">
+        <input
+          type="text"
+          placeholder="Ask a question..."
+        />
+
+        <button>Send</button>
+      </div>
     </div>
-
-    <div class="input-area">
-      <input
-        type="text"
-        placeholder="Ask a question..."
-      />
-
-      <button>Send</button>
-    </div>
-  </div>
 `
 
-const input = document.querySelector<HTMLInputElement>('input')!
-const button = document.querySelector<HTMLButtonElement>('button')!
+const input = document.querySelector<HTMLInputElement>('.input-area input')!
+const button = document.querySelector<HTMLButtonElement>('.input-area button')!
 const chat = document.querySelector<HTMLDivElement>('.chat')!
+const pdfInput = document.querySelector<HTMLInputElement>('#pdfInput')!
+const uploadButton = document.querySelector<HTMLButtonElement>('#uploadButton')!
+
+
+uploadButton.addEventListener('click', async () => {
+  const file = pdfInput.files?.[0]
+
+  if (!file) {
+    alert('Please select a PDF file.')
+    return
+  }
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  uploadButton.disabled = true
+  uploadButton.textContent = 'Uploading...'
+
+  try {
+    const response = await fetch('http://127.0.0.1:8000/upload', {
+      method: 'POST',
+      body: formData
+    })
+
+    const data = await response.json()
+
+    if (!response.ok || data.error) {
+      alert(data.error || 'Upload failed.')
+      return
+    }
+
+    history =[]
+    chat.innerHTML = ''
+    input.value = ''
+    alert('${data.filename} uploaded successfully!')
+
+  } catch (error) {
+    console.error(error)
+    alert('Could not connect to the server.')
+  } finally {
+    uploadButton.disabled = false
+    uploadButton.textContent = 'Upload PDF'
+  }
+})
+
+
+let history: { role: string; content: string }[] = [];
 
 async function askQuestion() {
   const question = input.value.trim()
@@ -50,12 +100,14 @@ async function askQuestion() {
 
   input.value = ''
 
+
   chat.innerHTML += `
     <div class="message assistant loading">
       <div class="message-label">Assistant</div>
       <div>Thinking...</div>
     </div>
   `
+
 try {
   const response = await fetch('http://127.0.0.1:8000/ask', {
     method: 'POST',
@@ -63,7 +115,8 @@ try {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      question: question
+      question: question,
+      history: history
     })
   })
 
@@ -72,6 +125,16 @@ try {
   }
 
   const data = await response.json()
+
+  history.push({
+    role: 'user',
+    content: question
+  })
+
+  history.push({
+    role: 'assistant',
+    content: data.answer
+  })
 
   chat.querySelector('.loading')?.remove()
 
