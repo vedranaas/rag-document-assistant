@@ -154,3 +154,20 @@ button:disabled {
   border-radius: 8px;
   cursor: pointer;
 }
+
+.answer table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.answer th,
+.answer td {
+  border: 1px solid #ddd;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.answer th {
+  font-weight: 600;
+}

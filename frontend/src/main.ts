@@ -1,4 +1,6 @@
 import './style.css'
+import { marked } from 'marked'
+
 const app = document.querySelector<HTMLDivElement>('#app')!
 
 app.innerHTML = `
@@ -159,7 +161,7 @@ chat.innerHTML += `
     <div class="message-label">Assistant</div>
 
     <div class="answer">
-      ${data.answer}
+      ${marked.parse(data.answer)}
     </div>
 
     ${sourcesHtml}

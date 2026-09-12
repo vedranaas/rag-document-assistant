@@ -55,7 +55,9 @@ hf_client=InferenceClient(
 
 def agent_answer(question: str, history):
 
-    documents = vector_store.similarity_search(question, k=3)
+    documents = vector_store.similarity_search(question, k=6)
+
+
     if not documents:
         return {
             "answer": "I cannot find the answer in the provided document.",
